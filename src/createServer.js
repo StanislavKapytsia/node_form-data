@@ -7,7 +7,7 @@ const fs = require('fs');
 
 function createServer() {
   const server = http.createServer(async (req, res) => {
-    function cheackValidation(obj) {
+    function checkValidation(obj) {
       if (typeof obj.date !== 'string' || !obj.date.trim()) {
         throw new Error(`Field of date not correct: ${obj.date}`);
       }
@@ -16,13 +16,15 @@ function createServer() {
         throw new Error(`Field of title not correct: ${obj.title}`);
       }
 
-      if (!Number.isFinite(obj.amount) || obj.amount <= 0) {
-        throw new Error(`Field of amount not correct: ${obj.amount}`);
+      const number = +obj.amount;
+
+      if (!Number.isFinite(number) || number <= 0) {
+        throw new Error(`Field of amount not correct: ${number}`);
       }
 
       const date = new Date(obj.date);
 
-      if (isNaN(date.getTime()) || !date.toISOString().startsWith(obj.date)) {
+      if (isNaN(date.getTime())) {
         throw new Error(`Field of date not correct: ${obj.date}`);
       }
 
@@ -32,29 +34,38 @@ function createServer() {
     if (req.method === 'POST') {
       let rawBody = '';
 
+      const contentType = req.headers['content-type'];
+
       req.on('data', (chunk) => {
         rawBody = rawBody + chunk;
       });
 
       req.on('end', () => {
-        const body = new URLSearchParams(rawBody);
-        const data = Object.fromEntries(body.entries());
+        let data = null;
 
-        for (const key in data) {
-          if (key === 'amount') {
-            data[key] = +data[key];
-          }
+        if (contentType === 'application/json') {
+          data = JSON.parse(rawBody);
+        }
+
+        if (contentType === 'application/x-www-form-urlencoded') {
+          data = Object.fromEntries(new URLSearchParams(rawBody));
+        }
+
+        if (data === null) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('Invalid JSON');
+
+          return;
         }
 
         try {
-          cheackValidation(data);
+          checkValidation(data);
         } catch (err) {
           res.writeHead(400, { 'Content-Type': 'text/html' });
 
           res.end(
             `<pre>${err.message}</pre> <pre>${JSON.stringify(
               {
-                error: 'Missing required fields',
                 invalid: data,
               },
               null,
@@ -74,28 +85,21 @@ function createServer() {
 
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
-        if (fs.existsSync(filePath)) {
-        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
 
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-
-        res.end(`
-  <pre>
-    ${JSON.stringify(data, null, 2)}
-  </pre>
-`);
+        res.end(JSON.stringify(data, null, 2));
       });
     }
 
     if (req.method === 'GET') {
       const normalizedUrl = new url.URL(
         req.url || '',
-        `http://${req.headers.host}`,
+        `http://${req.headers.host}` || 'http://localhost:5701',
       );
       const origin =
         path.basename(normalizedUrl.pathname.slice(1)) || 'index.html';
 
-      const originPathName = path.join(__dirname, '..', 'public', origin);
+      const originPathName = path.join(__dirname, origin);
 
       const fsStream = fs.createReadStream(originPathName);
 
