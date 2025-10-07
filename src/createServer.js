@@ -4,6 +4,7 @@ const http = require('http');
 const url = require('url');
 const path = require('path');
 const fs = require('fs');
+const mime = require('mime-types');
 
 function createServer() {
   const server = http.createServer(async (req, res) => {
@@ -43,17 +44,21 @@ function createServer() {
       req.on('end', () => {
         let data = null;
 
-        if (contentType === 'application/json') {
+        const normalizedContentType = contentType.includes(';')
+          ? contentType.split(';')[0]
+          : contentType;
+
+        if (normalizedContentType === 'application/json') {
           data = JSON.parse(rawBody);
         }
 
-        if (contentType === 'application/x-www-form-urlencoded') {
+        if (normalizedContentType === 'application/x-www-form-urlencoded') {
           data = Object.fromEntries(new URLSearchParams(rawBody));
         }
 
         if (data === null) {
           res.writeHead(400, { 'Content-Type': 'text/plain' });
-          res.end('Invalid JSON');
+          res.end(`Unsupported Content-Type: ${normalizedContentType}`);
 
           return;
         }
@@ -85,26 +90,29 @@ function createServer() {
 
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 'Content-Type': 'text/html' });
 
-        res.end(JSON.stringify(data, null, 2));
+        res.end(`<pre>${JSON.stringify(data, null, 2)}</pre>`);
       });
     }
 
     if (req.method === 'GET') {
-      const normalizedUrl = new url.URL(
-        req.url || '',
-        `http://${req.headers.host}` || 'http://localhost:5701',
-      );
+      const base = req.headers.host
+        ? `http://${req.headers.host}`
+        : 'http://localhost:5701';
+
+      const normalizedUrl = new url.URL(req.url || '', base);
       const origin =
         path.basename(normalizedUrl.pathname.slice(1)) || 'index.html';
+
+      const mimeType = mime.lookup(origin) || 'text/plain';
 
       const originPathName = path.join(__dirname, origin);
 
       const fsStream = fs.createReadStream(originPathName);
 
       fsStream.on('error', (err) => {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.writeHead(404, { 'Content-Type': mimeType });
         res.end(`Error reading file: ${String(err)}`);
       });
 
